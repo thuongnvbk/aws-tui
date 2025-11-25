@@ -103,7 +103,8 @@ func defaultKeyMap() keyMap {
 		Left:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev type")),
 		Right:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next type")),
 		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/detail")),
-		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		// Add an explicit "b" shortcut so users have an obvious back button in addition to Esc.
+		Back:     key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc/b", "back")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
