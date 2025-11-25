@@ -3,3 +3,27 @@ config.yaml
 config.local.yaml
 .aws-tui/
 *.aws-tui.yaml
+
+# Go build/cache artifacts
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.log
+coverage.*
+
+# IDE/editor noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env files
+.env
+.env.*
