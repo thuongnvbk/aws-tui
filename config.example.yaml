@@ -1,0 +1,108 @@
+# AWS TUI Configuration File
+# Place this file at ~/.aws-tui/config.yaml or specify with --config flag
+
+# AWS profiles to use (from ~/.aws/credentials)
+profiles:
+  - name: default
+    region: us-east-1
+    description: "Default AWS Account"
+  - name: production
+    region: us-west-2
+    description: "Production Environment"
+  - name: staging
+    region: eu-west-1
+    description: "Staging Environment"
+
+# Default profile to use on startup
+default_profile: default
+
+# Resource types to show in the dashboard
+resources:
+  ec2:
+    enabled: true
+    # Filter instances by tags (optional)
+    filters:
+      - key: Environment
+        values: [production, staging]
+  
+  eks:
+    enabled: true
+    # Show specific clusters only (empty = all)
+    clusters: []
+  
+  ecs:
+    enabled: true
+    clusters: []
+  
+  s3:
+    enabled: true
+    # Bucket prefixes to filter (empty = all)
+    prefixes: []
+  
+  rds:
+    enabled: true
+  
+  lambda:
+    enabled: true
+    # Filter by function prefix
+    prefixes: []
+
+# UI Settings
+ui:
+  # Theme: dark, light
+  theme: dark
+  # Refresh interval in seconds (0 = manual refresh only)
+  refresh_interval: 30
+  # Show resource counts in sidebar
+  show_counts: true
+  # Date format for timestamps
+  date_format: "2006-01-02 15:04:05"
+
+# Keyboard shortcuts (customizable)
+keybindings:
+  quit: "q"
+  refresh: "r"
+  help: "?"
+  search: "/"
+  filter: "f"
+  switch_profile: "p"
+  switch_region: "R"
+  action_menu: "a"
+  copy: "c"
+  logs: "l"
+
+# Quick actions per resource type
+actions:
+  ec2:
+    - name: "Start Instance"
+      command: "start"
+      confirm: true
+    - name: "Stop Instance"
+      command: "stop"
+      confirm: true
+    - name: "Reboot Instance"
+      command: "reboot"
+      confirm: true
+    - name: "SSH Connect"
+      command: "ssh"
+      template: "ssh -i {{.KeyName}} ec2-user@{{.PublicIP}}"
+  
+  eks:
+    - name: "Update Kubeconfig"
+      command: "kubeconfig"
+      template: "aws eks update-kubeconfig --name {{.ClusterName}} --region {{.Region}}"
+    - name: "Get Token"
+      command: "token"
+  
+  lambda:
+    - name: "Invoke"
+      command: "invoke"
+      confirm: true
+    - name: "View Logs"
+      command: "logs"
+
+# Logging
+logging:
+  enabled: true
+  file: "~/.aws-tui/aws-tui.log"
+  level: info  # debug, info, warn, error

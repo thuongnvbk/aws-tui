@@ -1,0 +1,5 @@
+# AWS TUI local config (do not commit credentials)
+config.yaml
+config.local.yaml
+.aws-tui/
+*.aws-tui.yaml
