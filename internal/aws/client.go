@@ -9,22 +9,26 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/kafka"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
 type Client struct {
-	cfg     aws.Config
-	Profile string
-	Region  string
-	dateFmt string
-	EC2     *ec2.Client
-	EKS     *eks.Client
-	ECS     *ecs.Client
-	S3      *s3.Client
-	RDS     *rds.Client
-	Lambda  *lambda.Client
+	cfg            aws.Config
+	Profile        string
+	Region         string
+	dateFmt        string
+	EC2            *ec2.Client
+	EKS            *eks.Client
+	ECS            *ecs.Client
+	S3             *s3.Client
+	RDS            *rds.Client
+	Lambda         *lambda.Client
+	MSK            *kafka.Client
+	SecretsManager *secretsmanager.Client
 }
 
 func NewClient(ctx context.Context, profile, region, dateFmt string) (*Client, error) {
@@ -46,16 +50,18 @@ func NewClient(ctx context.Context, profile, region, dateFmt string) (*Client, e
 	}
 
 	return &Client{
-		cfg:     cfg,
-		Profile: profile,
-		Region:  region,
-		dateFmt: dateFmt,
-		EC2:     ec2.NewFromConfig(cfg),
-		EKS:     eks.NewFromConfig(cfg),
-		ECS:     ecs.NewFromConfig(cfg),
-		S3:      s3.NewFromConfig(cfg),
-		RDS:     rds.NewFromConfig(cfg),
-		Lambda:  lambda.NewFromConfig(cfg),
+		cfg:            cfg,
+		Profile:        profile,
+		Region:         region,
+		dateFmt:        dateFmt,
+		EC2:            ec2.NewFromConfig(cfg),
+		EKS:            eks.NewFromConfig(cfg),
+		ECS:            ecs.NewFromConfig(cfg),
+		S3:             s3.NewFromConfig(cfg),
+		RDS:            rds.NewFromConfig(cfg),
+		Lambda:         lambda.NewFromConfig(cfg),
+		MSK:            kafka.NewFromConfig(cfg),
+		SecretsManager: secretsmanager.NewFromConfig(cfg),
 	}, nil
 }
 

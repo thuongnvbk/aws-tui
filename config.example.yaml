@@ -47,6 +47,11 @@ resources:
     # Filter by function prefix
     prefixes: []
 
+  msk:
+    enabled: true
+    # Filter clusters by name prefix
+    prefixes: []
+
 # UI Settings
 ui:
   # Theme: dark, light

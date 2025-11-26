@@ -30,10 +30,29 @@ const (
 	ResourceS3
 	ResourceRDS
 	ResourceLambda
+	ResourceMSK
+	resourceTypeCount
 )
 
 func (r ResourceType) String() string {
-	return []string{"EC2", "EKS", "ECS", "S3", "RDS", "Lambda"}[r]
+	switch r {
+	case ResourceEC2:
+		return "EC2"
+	case ResourceEKS:
+		return "EKS"
+	case ResourceECS:
+		return "ECS"
+	case ResourceS3:
+		return "S3"
+	case ResourceRDS:
+		return "RDS"
+	case ResourceLambda:
+		return "Lambda"
+	case ResourceMSK:
+		return "MSK"
+	default:
+		return "Unknown"
+	}
 }
 
 type ViewMode int
@@ -45,6 +64,7 @@ const (
 	ViewProfileSelect
 	ViewRegionSelect
 	ViewConfirm
+	ViewTopicsInput
 )
 
 type Model struct {
@@ -72,11 +92,17 @@ type Model struct {
 	s3Buckets       []aws.S3Bucket
 	rdsInstances    []aws.RDSInstance
 	lambdaFunctions []aws.LambdaFunction
+	mskClusters     []aws.MSKCluster
 
 	// Selection
 	selectedIndex int
 	profiles      []string
 	regions       []string
+
+	// MSK Topics
+	mskUsername string
+	mskPassword string
+	inputField  int // 0 = username, 1 = password
 }
 
 type keyMap struct {
@@ -94,15 +120,16 @@ type keyMap struct {
 	Tab      key.Binding
 	ShiftTab key.Binding
 	Copy     key.Binding
+	Topics   key.Binding
 }
 
 func defaultKeyMap() keyMap {
 	return keyMap{
-		Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-		Left:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev type")),
-		Right:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next type")),
-		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/detail")),
+		Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+		Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev type")),
+		Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next type")),
+		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/detail")),
 		// Add an explicit "b" shortcut so users have an obvious back button in addition to Esc.
 		Back:     key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc/b", "back")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
@@ -113,6 +140,7 @@ func defaultKeyMap() keyMap {
 		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next resource")),
 		ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev resource")),
 		Copy:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy ID")),
+		Topics:   key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "fetch topics")),
 	}
 }
 
@@ -175,10 +203,16 @@ type fetchCompleteMsg struct {
 	s3           []aws.S3Bucket
 	rds          []aws.RDSInstance
 	lambda       []aws.LambdaFunction
+	msk          []aws.MSKCluster
 }
 
 type actionCompleteMsg struct {
 	action string
+	err    error
+}
+
+type topicsFetchCompleteMsg struct {
+	topics []aws.KafkaTopic
 	err    error
 }
 
@@ -293,6 +327,11 @@ func (m Model) fetchResources() tea.Cmd {
 			if len(m.cfg.Resources.Lambda.Prefixes) > 0 {
 				msg.lambda = filterLambdaFunctions(msg.lambda, m.cfg.Resources.Lambda.Prefixes)
 			}
+		case ResourceMSK:
+			msg.msk, msg.err = m.client.ListMSKClusters(m.ctx)
+			if len(m.cfg.Resources.MSK.Prefixes) > 0 {
+				msg.msk = filterMSKClusters(msg.msk, m.cfg.Resources.MSK.Prefixes)
+			}
 		}
 
 		return msg
@@ -306,6 +345,30 @@ func (m Model) scheduleRefreshTick() tea.Cmd {
 	return tea.Tick(m.refreshEvery, func(time.Time) tea.Msg {
 		return refreshTickMsg{}
 	})
+}
+
+func (m Model) fetchTopics(cluster *aws.MSKCluster) tea.Cmd {
+	return func() tea.Msg {
+		username := m.mskUsername
+		password := m.mskPassword
+
+		// If no credentials provided and cluster has secret ARNs, try to fetch from Secrets Manager
+		if username == "" && password == "" && len(cluster.SecretArns) > 0 {
+			// Try the first secret ARN
+			creds, err := m.client.GetMSKCredentials(m.ctx, cluster.SecretArns[0])
+			if err == nil && creds != nil {
+				username = creds.Username
+				password = creds.Password
+			}
+			// If fetching fails, we'll try to connect without credentials (for unauthenticated clusters)
+		}
+
+		topics, err := m.client.ListTopics(m.ctx, cluster, username, password)
+		return topicsFetchCompleteMsg{
+			topics: topics,
+			err:    err,
+		}
+	}
 }
 
 func buildEC2Filters(cfgFilters []config.Filter) []types.Filter {
@@ -370,6 +433,16 @@ func filterLambdaFunctions(funcs []aws.LambdaFunction, prefixes []string) []aws.
 	return filtered
 }
 
+func filterMSKClusters(clusters []aws.MSKCluster, prefixes []string) []aws.MSKCluster {
+	var filtered []aws.MSKCluster
+	for _, c := range clusters {
+		if hasPrefix(c.Name, prefixes) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
 func hasPrefix(name string, prefixes []string) bool {
 	if len(prefixes) == 0 {
 		return true
@@ -396,6 +469,8 @@ func selectedResourceID(item listItem) string {
 		return res.Identifier
 	case aws.LambdaFunction:
 		return res.Name
+	case aws.MSKCluster:
+		return res.Arn
 	default:
 		return ""
 	}
@@ -458,6 +533,15 @@ func (m *Model) updateListItems() {
 				resource: fn,
 			})
 		}
+	case ResourceMSK:
+		for _, cluster := range m.mskClusters {
+			items = append(items, listItem{
+				title:    cluster.Name,
+				desc:     fmt.Sprintf("%s | v%s | %d brokers", cluster.State, cluster.KafkaVersion, cluster.BrokerNodes),
+				status:   cluster.State,
+				resource: cluster,
+			})
+		}
 	}
 
 	m.list.SetItems(items)
@@ -484,6 +568,8 @@ func (m *Model) showDetail() {
 	case aws.RDSInstance:
 		lines = res.DetailLines()
 	case aws.LambdaFunction:
+		lines = res.DetailLines()
+	case aws.MSKCluster:
 		lines = res.DetailLines()
 	}
 
@@ -531,6 +617,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rdsInstances = msg.rds
 			case ResourceLambda:
 				m.lambdaFunctions = msg.lambda
+			case ResourceMSK:
+				m.mskClusters = msg.msk
 			}
 			m.updateListItems()
 			m.statusMsg = fmt.Sprintf("Loaded %s", m.resourceType.String())
@@ -543,6 +631,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = fmt.Sprintf("Action '%s' completed", msg.action)
 			cmds = append(cmds, m.fetchResources())
+		}
+
+	case topicsFetchCompleteMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Failed to fetch topics: %v", msg.err)
+		} else {
+			// Update the current MSK cluster with topics
+			if m.resourceType == ResourceMSK && m.list.SelectedItem() != nil {
+				item := m.list.SelectedItem().(listItem)
+				if cluster, ok := item.resource.(aws.MSKCluster); ok {
+					cluster.Topics = msg.topics
+					// Update in the slice
+					for i, c := range m.mskClusters {
+						if c.Arn == cluster.Arn {
+							m.mskClusters[i] = cluster
+							break
+						}
+					}
+					// Refresh the detail view
+					m.showDetail()
+					m.statusMsg = fmt.Sprintf("Loaded %d topics", len(msg.topics))
+				}
+			}
 		}
 
 	case refreshTickMsg:
@@ -570,6 +682,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.detail, cmd = m.detail.Update(msg)
 				cmds = append(cmds, cmd)
+			case key.Matches(msg, m.keys.Topics):
+				// Only handle topics for MSK resources
+				if m.resourceType == ResourceMSK && m.list.SelectedItem() != nil {
+					item := m.list.SelectedItem().(listItem)
+					if cluster, ok := item.resource.(aws.MSKCluster); ok {
+						m.loading = true
+						m.statusMsg = "Fetching topics..."
+						cmds = append(cmds, m.fetchTopics(&cluster), m.spinner.Tick)
+					}
+				}
 			}
 			return m, tea.Batch(cmds...)
 		}
@@ -650,13 +772,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Enter):
 			m.showDetail()
 		case key.Matches(msg, m.keys.Tab), key.Matches(msg, m.keys.Right):
-			m.resourceType = (m.resourceType + 1) % 6
+			m.resourceType = (m.resourceType + 1) % resourceTypeCount
 			m.loading = true
 			m.err = nil
 			cmds = append(cmds, m.fetchResources(), m.spinner.Tick)
 		case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Left):
 			if m.resourceType == 0 {
-				m.resourceType = ResourceLambda
+				m.resourceType = resourceTypeCount - 1
 			} else {
 				m.resourceType--
 			}

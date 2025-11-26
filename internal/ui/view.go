@@ -118,7 +118,7 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderTabs() string {
-	resources := []ResourceType{ResourceEC2, ResourceEKS, ResourceECS, ResourceS3, ResourceRDS, ResourceLambda}
+	resources := []ResourceType{ResourceEC2, ResourceEKS, ResourceECS, ResourceS3, ResourceRDS, ResourceLambda, ResourceMSK}
 	var tabs []string
 
 	for _, r := range resources {

@@ -6,6 +6,9 @@ BUILD_DIR=./build
 GOCACHE:=$(abspath $(BUILD_DIR)/.gocache)
 GOTMPDIR:=$(abspath $(BUILD_DIR)/.gotmp)
 ENV_VARS=GOCACHE=$(GOCACHE) GOTMPDIR=$(GOTMPDIR)
+# First entry in GOPATH so multi-path setups still work
+GOPATH_ROOT:=$(firstword $(subst :, ,$(shell go env GOPATH 2>/dev/null)))
+GOBIN:=$(if $(GOPATH_ROOT),$(GOPATH_ROOT)/bin,)
 
 # Detect main package location
 ifneq ($(wildcard ./cmd/aws-tui/main.go),)
@@ -34,6 +37,13 @@ build:
 	@echo "Building from $(MAIN_PATH)..."
 	$(ENV_VARS) go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "Built $(BUILD_DIR)/$(BINARY_NAME)"
+	@if [ -n "$(GOBIN)" ]; then \
+		mkdir -p "$(GOBIN)"; \
+		cp "$(BUILD_DIR)/$(BINARY_NAME)" "$(GOBIN)/$(BINARY_NAME)"; \
+		echo "Copied to $(GOBIN)/$(BINARY_NAME)"; \
+	else \
+		echo "GOPATH not set, skipped copy to GOPATH/bin"; \
+	fi
 
 # Build for multiple platforms
 build-all: deps

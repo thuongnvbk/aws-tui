@@ -30,6 +30,7 @@ type ResourceConfig struct {
 	S3     S3Config     `yaml:"s3"`
 	RDS    RDSConfig    `yaml:"rds"`
 	Lambda LambdaConfig `yaml:"lambda"`
+	MSK    MSKConfig    `yaml:"msk"`
 }
 
 type EC2Config struct {
@@ -62,6 +63,11 @@ type RDSConfig struct {
 }
 
 type LambdaConfig struct {
+	Enabled  bool     `yaml:"enabled"`
+	Prefixes []string `yaml:"prefixes"`
+}
+
+type MSKConfig struct {
 	Enabled  bool     `yaml:"enabled"`
 	Prefixes []string `yaml:"prefixes"`
 }
@@ -118,6 +124,7 @@ func DefaultConfig() *Config {
 			S3:     S3Config{Enabled: true},
 			RDS:    RDSConfig{Enabled: true},
 			Lambda: LambdaConfig{Enabled: true},
+			MSK:    MSKConfig{Enabled: true},
 		},
 		UI: UIConfig{
 			Theme:           "dark",
