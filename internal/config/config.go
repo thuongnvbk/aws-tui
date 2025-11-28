@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -199,4 +201,33 @@ func (c *Config) GetProfile(name string) *Profile {
 
 func (c *Config) GetDefaultProfile() *Profile {
 	return c.GetProfile(c.DefaultProfile)
+}
+
+// Validate checks the configuration for invalid values and returns an error if any are found.
+func (c *Config) Validate() error {
+	if c.UI.RefreshInterval < 0 {
+		return fmt.Errorf("ui.refresh_interval cannot be negative: %d", c.UI.RefreshInterval)
+	}
+
+	if c.UI.DateFormat != "" {
+		// Try to parse a reference time to validate the format
+		refTime := "2006-01-02 15:04:05"
+		if _, err := time.Parse(c.UI.DateFormat, refTime); err != nil {
+			// The format might be valid but just different, so we do a simple check
+			// by trying to format and then parse back
+			testTime := time.Now()
+			formatted := testTime.Format(c.UI.DateFormat)
+			if _, err := time.Parse(c.UI.DateFormat, formatted); err != nil {
+				return fmt.Errorf("ui.date_format is invalid: %s", c.UI.DateFormat)
+			}
+		}
+	}
+
+	for i, p := range c.Profiles {
+		if p.Name == "" {
+			return fmt.Errorf("profiles[%d].name cannot be empty", i)
+		}
+	}
+
+	return nil
 }

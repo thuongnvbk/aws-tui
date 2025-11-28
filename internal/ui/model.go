@@ -63,14 +63,11 @@ const (
 	ViewHelp
 	ViewProfileSelect
 	ViewRegionSelect
-	ViewConfirm
-	ViewTopicsInput
 )
 
 type Model struct {
 	cfg          *config.Config
 	client       *aws.Client
-	ctx          context.Context
 	width        int
 	height       int
 	refreshEvery time.Duration
@@ -272,7 +269,6 @@ func NewModel(cfg *config.Config, client *aws.Client) Model {
 	return Model{
 		cfg:          cfg,
 		client:       client,
-		ctx:          context.Background(),
 		refreshEvery: refreshEvery,
 		resourceType: ResourceEC2,
 		viewMode:     ViewList,
@@ -299,36 +295,58 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) fetchResources() tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
 		msg := fetchCompleteMsg{resourceType: m.resourceType}
 
 		switch m.resourceType {
 		case ResourceEC2:
+			if !m.cfg.Resources.EC2.Enabled {
+				return msg
+			}
 			filters := buildEC2Filters(m.cfg.Resources.EC2.Filters)
-			msg.ec2, msg.err = m.client.ListEC2Instances(m.ctx, filters)
+			msg.ec2, msg.err = m.client.ListEC2Instances(ctx, filters)
 		case ResourceEKS:
-			msg.eks, msg.err = m.client.ListEKSClusters(m.ctx)
+			if !m.cfg.Resources.EKS.Enabled {
+				return msg
+			}
+			msg.eks, msg.err = m.client.ListEKSClusters(ctx)
 			if len(m.cfg.Resources.EKS.Clusters) > 0 {
 				msg.eks = filterEKSClusters(msg.eks, m.cfg.Resources.EKS.Clusters)
 			}
 		case ResourceECS:
-			msg.ecs, msg.err = m.client.ListECSClusters(m.ctx)
+			if !m.cfg.Resources.ECS.Enabled {
+				return msg
+			}
+			msg.ecs, msg.err = m.client.ListECSClusters(ctx)
 			if len(m.cfg.Resources.ECS.Clusters) > 0 {
 				msg.ecs = filterECSClusters(msg.ecs, m.cfg.Resources.ECS.Clusters)
 			}
 		case ResourceS3:
-			msg.s3, msg.err = m.client.ListS3Buckets(m.ctx)
+			if !m.cfg.Resources.S3.Enabled {
+				return msg
+			}
+			msg.s3, msg.err = m.client.ListS3Buckets(ctx)
 			if len(m.cfg.Resources.S3.Prefixes) > 0 {
 				msg.s3 = filterS3Buckets(msg.s3, m.cfg.Resources.S3.Prefixes)
 			}
 		case ResourceRDS:
-			msg.rds, msg.err = m.client.ListRDSInstances(m.ctx)
+			if !m.cfg.Resources.RDS.Enabled {
+				return msg
+			}
+			msg.rds, msg.err = m.client.ListRDSInstances(ctx)
 		case ResourceLambda:
-			msg.lambda, msg.err = m.client.ListLambdaFunctions(m.ctx)
+			if !m.cfg.Resources.Lambda.Enabled {
+				return msg
+			}
+			msg.lambda, msg.err = m.client.ListLambdaFunctions(ctx)
 			if len(m.cfg.Resources.Lambda.Prefixes) > 0 {
 				msg.lambda = filterLambdaFunctions(msg.lambda, m.cfg.Resources.Lambda.Prefixes)
 			}
 		case ResourceMSK:
-			msg.msk, msg.err = m.client.ListMSKClusters(m.ctx)
+			if !m.cfg.Resources.MSK.Enabled {
+				return msg
+			}
+			msg.msk, msg.err = m.client.ListMSKClusters(ctx)
 			if len(m.cfg.Resources.MSK.Prefixes) > 0 {
 				msg.msk = filterMSKClusters(msg.msk, m.cfg.Resources.MSK.Prefixes)
 			}
@@ -349,13 +367,14 @@ func (m Model) scheduleRefreshTick() tea.Cmd {
 
 func (m Model) fetchTopics(cluster *aws.MSKCluster) tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
 		username := m.mskUsername
 		password := m.mskPassword
 
 		// If no credentials provided and cluster has secret ARNs, try to fetch from Secrets Manager
 		if username == "" && password == "" && len(cluster.SecretArns) > 0 {
 			// Try the first secret ARN
-			creds, err := m.client.GetMSKCredentials(m.ctx, cluster.SecretArns[0])
+			creds, err := m.client.GetMSKCredentials(ctx, cluster.SecretArns[0])
 			if err == nil && creds != nil {
 				username = creds.Username
 				password = creds.Password
@@ -363,7 +382,7 @@ func (m Model) fetchTopics(cluster *aws.MSKCluster) tea.Cmd {
 			// If fetching fails, we'll try to connect without credentials (for unauthenticated clusters)
 		}
 
-		topics, err := m.client.ListTopics(m.ctx, cluster, username, password)
+		topics, err := m.client.ListTopics(ctx, cluster, username, password)
 		return topicsFetchCompleteMsg{
 			topics: topics,
 			err:    err,
@@ -643,13 +662,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				item := m.list.SelectedItem().(listItem)
 				if cluster, ok := item.resource.(aws.MSKCluster); ok {
 					cluster.Topics = msg.topics
-					// Update in the slice
-					for i, c := range m.mskClusters {
+					// Create a new slice to avoid race conditions
+					newClusters := make([]aws.MSKCluster, len(m.mskClusters))
+					copy(newClusters, m.mskClusters)
+					for i, c := range newClusters {
 						if c.Arn == cluster.Arn {
-							m.mskClusters[i] = cluster
+							newClusters[i] = cluster
 							break
 						}
 					}
+					m.mskClusters = newClusters
 					// Refresh the detail view
 					m.showDetail()
 					m.statusMsg = fmt.Sprintf("Loaded %d topics", len(msg.topics))
@@ -697,6 +719,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.viewMode == ViewProfileSelect {
+			if len(m.profiles) == 0 {
+				m.viewMode = ViewList
+				m.statusMsg = "No profiles configured"
+				return m, nil
+			}
 			switch {
 			case key.Matches(msg, m.keys.Back):
 				m.viewMode = ViewList
@@ -709,15 +736,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedIndex++
 				}
 			case key.Matches(msg, m.keys.Enter):
+				if m.selectedIndex >= len(m.profiles) {
+					return m, nil
+				}
 				profile := m.cfg.GetProfile(m.profiles[m.selectedIndex])
 				if profile != nil {
 					m.loading = true
 					m.viewMode = ViewList
 					m.err = nil
+					profileName := profile.Name
+					profileRegion := profile.Region
+					resourceType := m.resourceType
 					return m, func() tea.Msg {
-						err := m.client.SwitchProfile(m.ctx, profile.Name, profile.Region)
-						if err != nil {
-							return fetchCompleteMsg{resourceType: m.resourceType, err: err}
+						ctx := context.Background()
+						if err := m.client.SwitchProfile(ctx, profileName, profileRegion); err != nil {
+							return fetchCompleteMsg{resourceType: resourceType, err: err}
 						}
 						return m.fetchResources()()
 					}
@@ -727,6 +760,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.viewMode == ViewRegionSelect {
+			if len(m.regions) == 0 {
+				m.viewMode = ViewList
+				m.statusMsg = "No regions configured"
+				return m, nil
+			}
 			switch {
 			case key.Matches(msg, m.keys.Back):
 				m.viewMode = ViewList
@@ -739,14 +777,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedIndex++
 				}
 			case key.Matches(msg, m.keys.Enter):
+				if m.selectedIndex >= len(m.regions) {
+					return m, nil
+				}
 				region := m.regions[m.selectedIndex]
 				m.loading = true
 				m.viewMode = ViewList
 				m.err = nil
+				resourceType := m.resourceType
 				return m, func() tea.Msg {
-					err := m.client.SwitchRegion(m.ctx, region)
-					if err != nil {
-						return fetchCompleteMsg{resourceType: m.resourceType, err: err}
+					ctx := context.Background()
+					if err := m.client.SwitchRegion(ctx, region); err != nil {
+						return fetchCompleteMsg{resourceType: resourceType, err: err}
 					}
 					return m.fetchResources()()
 				}

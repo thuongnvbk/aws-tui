@@ -38,7 +38,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLogging(cfg.Logging)
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	logFile := setupLogging(cfg.Logging)
+	if logFile != nil {
+		defer logFile.Close()
+	}
 
 	// Determine profile and region
 	activeProfile := cfg.DefaultProfile
@@ -73,27 +81,28 @@ func main() {
 	}
 }
 
-func setupLogging(cfg config.LoggingConfig) {
+func setupLogging(cfg config.LoggingConfig) *os.File {
 	if !cfg.Enabled || cfg.File == "" {
-		return
+		return nil
 	}
 
 	path := expandPath(cfg.File)
 	if path == "" {
-		return
+		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
+		return nil
 	}
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return
+		return nil
 	}
 	log.SetOutput(f)
 	log.SetFlags(log.LstdFlags)
 	log.SetPrefix("aws-tui ")
+	return f
 }
 
 func expandPath(path string) string {

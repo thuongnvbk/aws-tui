@@ -2,9 +2,11 @@ package aws
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -159,24 +161,12 @@ func (c *Client) listScramSecrets(ctx context.Context, clusterArn string) ([]str
 }
 
 func (c *Client) listBrokerNodes(ctx context.Context, clusterArn string) ([]BrokerNode, error) {
-	// MaxResults must be at least 3 for KRaft clusters
 	output, err := c.MSK.ListNodes(ctx, &kafka.ListNodesInput{
 		ClusterArn: aws.String(clusterArn),
 		MaxResults: aws.Int32(100),
 	})
 	if err != nil {
-		// If error says maxResults should be greater than 3, try again with 3
-		if strings.Contains(err.Error(), "maxResults should be greater than 3") {
-			output, err = c.MSK.ListNodes(ctx, &kafka.ListNodesInput{
-				ClusterArn: aws.String(clusterArn),
-				MaxResults: aws.Int32(100),
-			})
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	var nodes []BrokerNode
@@ -383,11 +373,13 @@ func (c *Client) ListTopics(ctx context.Context, cluster *MSKCluster, username, 
 			Timeout:       10 * time.Second,
 			DualStack:     true,
 			SASLMechanism: mechanism,
+			TLS:           &tls.Config{MinVersion: tls.VersionTLS12},
 		}
 	} else {
 		dialer = &kafkago.Dialer{
 			Timeout:   10 * time.Second,
 			DualStack: true,
+			TLS:       &tls.Config{MinVersion: tls.VersionTLS12},
 		}
 	}
 
@@ -436,11 +428,7 @@ func (c *Client) ListTopics(ctx context.Context, cluster *MSKCluster, username, 
 }
 
 func sortTopics(topics []KafkaTopic) {
-	for i := 0; i < len(topics)-1; i++ {
-		for j := i + 1; j < len(topics); j++ {
-			if topics[i].Name > topics[j].Name {
-				topics[i], topics[j] = topics[j], topics[i]
-			}
-		}
-	}
+	sort.Slice(topics, func(i, j int) bool {
+		return topics[i].Name < topics[j].Name
+	})
 }
