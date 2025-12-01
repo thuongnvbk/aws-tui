@@ -8,6 +8,7 @@ A fast, intuitive Terminal User Interface for managing AWS resources. Stop memor
 ## Features
 
 - **Multi-resource support**: EC2, EKS, ECS, S3, RDS, Lambda
+- **S3 Browser**: Navigate bucket contents, view objects, download files
 - **Profile switching**: Quickly switch between AWS profiles
 - **Region switching**: Change regions on the fly
 - **YAML configuration**: Customize everything via config file
@@ -111,6 +112,17 @@ aws-tui --region eu-west-1
 | `S` | Stop instance (EC2) |
 | `c` | Copy resource ID |
 | `/` | Search/Filter |
+
+### S3 Browser (when viewing S3 buckets)
+| Key | Action |
+|-----|--------|
+| `Enter` | Browse bucket / Open folder / View object |
+| `Backspace` | Go up one level |
+| `/` | Search objects with regex |
+| `Esc` | Clear search filter / Go back |
+| `v` | View object content (text files) |
+| `d` | Download object |
+| `c` | Copy object key / Generate presigned URL |
 
 ### General
 | Key | Action |

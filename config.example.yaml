@@ -38,6 +38,18 @@ resources:
     enabled: true
     # Bucket prefixes to filter (empty = all)
     prefixes: []
+    # S3 browsing settings
+    max_objects_per_page: 1000
+    content_preview_size: 102400  # 100 KB
+    supported_preview_types:
+      - text/plain
+      - application/json
+      - application/yaml
+      - text/csv
+      - text/html
+      - text/xml
+      - application/xml
+    download_directory: "~/Downloads"
   
   rds:
     enabled: true

@@ -92,6 +92,12 @@ func (m Model) View() string {
 		b.WriteString(m.renderProfileSelect())
 	case ViewRegionSelect:
 		b.WriteString(m.renderRegionSelect())
+	case ViewS3Browser:
+		b.WriteString(m.renderS3Browser())
+	case ViewS3ObjectDetail:
+		b.WriteString(m.renderS3ObjectDetail())
+	case ViewS3ObjectContent:
+		b.WriteString(m.renderS3ObjectContent())
 	}
 
 	// Status bar

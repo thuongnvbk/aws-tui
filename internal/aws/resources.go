@@ -16,6 +16,8 @@ type S3Bucket struct {
 	Name         string
 	CreationDate string
 	Region       string
+	Versioning   bool
+	Encryption   bool
 }
 
 func (c *Client) ListS3Buckets(ctx context.Context) ([]S3Bucket, error) {

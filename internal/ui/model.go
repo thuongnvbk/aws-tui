@@ -63,6 +63,10 @@ const (
 	ViewHelp
 	ViewProfileSelect
 	ViewRegionSelect
+	ViewConfirm
+	ViewS3Browser       // Browse S3 objects
+	ViewS3ObjectDetail  // View object details
+	ViewS3ObjectContent // View object content
 )
 
 type Model struct {
@@ -91,6 +95,18 @@ type Model struct {
 	lambdaFunctions []aws.LambdaFunction
 	mskClusters     []aws.MSKCluster
 
+	// S3 browsing state
+	currentBucket     string
+	currentPrefix     string
+	s3Objects         []aws.S3Object
+	s3ObjectsFiltered []aws.S3Object // Filtered results from search
+	s3BreadcrumbPath  []string
+	s3ObjectDetail    *aws.S3ObjectDetail
+	s3ContentViewer   viewport.Model
+	s3SearchMode      bool   // Whether search mode is active
+	s3SearchQuery     string // Current search query
+	s3SearchError     string // Search error message
+
 	// Selection
 	selectedIndex int
 	profiles      []string
@@ -118,16 +134,20 @@ type keyMap struct {
 	ShiftTab key.Binding
 	Copy     key.Binding
 	Topics   key.Binding
+	Browse   key.Binding // Browse S3 bucket contents
+	View     key.Binding // View object content
+	Download key.Binding // Download object
+	GoUp     key.Binding // Go up one level in S3 browser
+	Search   key.Binding // Search/filter objects
 }
 
 func defaultKeyMap() keyMap {
 	return keyMap{
-		Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-		Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev type")),
-		Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next type")),
-		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/detail")),
-		// Add an explicit "b" shortcut so users have an obvious back button in addition to Esc.
+		Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+		Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Left:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev type")),
+		Right:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next type")),
+		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/detail")),
 		Back:     key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc/b", "back")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
@@ -138,6 +158,11 @@ func defaultKeyMap() keyMap {
 		ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev resource")),
 		Copy:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy ID")),
 		Topics:   key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "fetch topics")),
+		Browse:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "browse bucket")),
+		View:     key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "view content")),
+		Download: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download")),
+		GoUp:     key.NewBinding(key.WithKeys("backspace"), key.WithHelp("backspace", "go up")),
+		Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	}
 }
 
@@ -211,6 +236,26 @@ type actionCompleteMsg struct {
 type topicsFetchCompleteMsg struct {
 	topics []aws.KafkaTopic
 	err    error
+}
+
+type s3ObjectsFetchedMsg struct {
+	objects []aws.S3Object
+	err     error
+}
+
+type s3ObjectDetailFetchedMsg struct {
+	detail *aws.S3ObjectDetail
+	err    error
+}
+
+type s3ObjectContentFetchedMsg struct {
+	content string
+	err     error
+}
+
+type s3DownloadCompleteMsg struct {
+	path string
+	err  error
 }
 
 type refreshTickMsg struct{}
@@ -679,6 +724,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case s3ObjectsFetchedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.statusMsg = fmt.Sprintf("Error loading objects: %v", msg.err)
+		} else {
+			m.s3Objects = msg.objects
+			m.updateS3ObjectsList()
+			m.statusMsg = fmt.Sprintf("Loaded %d items", len(msg.objects))
+		}
+
+	case s3ObjectDetailFetchedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error loading object details: %v", msg.err)
+		} else {
+			m.s3ObjectDetail = msg.detail
+			m.viewMode = ViewS3ObjectDetail
+			m.statusMsg = "Object details loaded"
+		}
+
+	case s3ObjectContentFetchedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error loading content: %v", msg.err)
+		} else {
+			m.s3ContentViewer = viewport.New(m.width-4, m.height-10)
+			m.s3ContentViewer.SetContent(msg.content)
+			m.viewMode = ViewS3ObjectContent
+			m.statusMsg = "Content loaded"
+		}
+
+	case s3DownloadCompleteMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Download failed: %v", msg.err)
+		} else {
+			m.statusMsg = fmt.Sprintf("Downloaded to: %s", msg.path)
+		}
+
 	case refreshTickMsg:
 		if !m.loading {
 			m.loading = true
@@ -796,6 +881,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// S3 Browser view
+		if m.viewMode == ViewS3Browser {
+			return m.handleS3BrowserKeys(msg)
+		}
+
+		// S3 Object Detail view
+		if m.viewMode == ViewS3ObjectDetail {
+			return m.handleS3ObjectDetailKeys(msg)
+		}
+
+		// S3 Object Content view
+		if m.viewMode == ViewS3ObjectContent {
+			return m.handleS3ObjectContentKeys(msg)
+		}
+
 		// Main list view
 		switch {
 		case key.Matches(msg, m.keys.Quit):
@@ -812,7 +912,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			cmds = append(cmds, m.fetchResources(), m.spinner.Tick)
 		case key.Matches(msg, m.keys.Enter):
-			m.showDetail()
+			// Special handling for S3 buckets - open browser instead of detail view
+			if m.resourceType == ResourceS3 && m.list.SelectedItem() != nil {
+				item := m.list.SelectedItem().(listItem)
+				if bucket, ok := item.resource.(aws.S3Bucket); ok {
+					m.currentBucket = bucket.Name
+					m.currentPrefix = ""
+					m.s3BreadcrumbPath = aws.BuildBreadcrumb(bucket.Name, "")
+					m.viewMode = ViewS3Browser
+					m.loading = true
+					cmds = append(cmds, m.fetchS3Objects(), m.spinner.Tick)
+				}
+			} else {
+				m.showDetail()
+			}
 		case key.Matches(msg, m.keys.Tab), key.Matches(msg, m.keys.Right):
 			m.resourceType = (m.resourceType + 1) % resourceTypeCount
 			m.loading = true

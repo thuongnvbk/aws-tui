@@ -56,8 +56,12 @@ type ECSConfig struct {
 }
 
 type S3Config struct {
-	Enabled  bool     `yaml:"enabled"`
-	Prefixes []string `yaml:"prefixes"`
+	Enabled               bool     `yaml:"enabled"`
+	Prefixes              []string `yaml:"prefixes"`
+	MaxObjectsPerPage     int      `yaml:"max_objects_per_page"`
+	ContentPreviewSize    int64    `yaml:"content_preview_size"`
+	SupportedPreviewTypes []string `yaml:"supported_preview_types"`
+	DownloadDirectory     string   `yaml:"download_directory"`
 }
 
 type RDSConfig struct {
@@ -120,10 +124,22 @@ func DefaultConfig() *Config {
 		},
 		DefaultProfile: "default",
 		Resources: ResourceConfig{
-			EC2:    EC2Config{Enabled: true},
-			EKS:    EKSConfig{Enabled: true},
-			ECS:    ECSConfig{Enabled: true},
-			S3:     S3Config{Enabled: true},
+			EC2: EC2Config{Enabled: true},
+			EKS: EKSConfig{Enabled: true},
+			ECS: ECSConfig{Enabled: true},
+			S3: S3Config{
+				Enabled:            true,
+				MaxObjectsPerPage:  1000,
+				ContentPreviewSize: 102400, // 100 KB
+				SupportedPreviewTypes: []string{
+					"text/plain",
+					"application/json",
+					"application/yaml",
+					"text/csv",
+					"text/html",
+				},
+				DownloadDirectory: "~/Downloads",
+			},
 			RDS:    RDSConfig{Enabled: true},
 			Lambda: LambdaConfig{Enabled: true},
 			MSK:    MSKConfig{Enabled: true},
